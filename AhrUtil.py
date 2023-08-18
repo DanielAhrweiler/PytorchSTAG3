@@ -15,12 +15,59 @@ def getDatesBetween(startDate, endDate):
 				dates.append(str(itrDate.date()))
 	return dates
 
+#get list of dates in range and match given MS Mask
+def getDatesBetweenAndMS(sdate, edate, msMask):
+	print('sdate : ', sdate)
+	print('edate : ', edate)
+	print('msMask : ', msMask)
+	msDates = []
+	msPath = os.path.join('..', 'in', 'mstates.txt')
+	with open(msPath, 'r') as msFile:
+		for msLine in msFile:
+			lineEles = msLine.strip().split(',')
+			msDate = lineEles[0]
+			matches_ms_mask = False
+			date_in_range = isDateInRange(msDate, sdate, edate)
+			if date_in_range:
+				msState = lineEles[2]
+				matches_ms_mask = compareMasks(msMask, msState)
+				#print('MS Mask: ', msMask, '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
+				if matches_ms_mask:
+					msDates.append(msDate)
+	msDates.reverse()
+	return msDates
+
 #get bool if date is b/w 2 other dates
 def isDateInRange(inDate, startDate, endDate):
 	idate = dt.strptime(inDate, "%Y-%m-%d")
 	sdate = dt.strptime(startDate, "%Y-%m-%d")
 	edate = dt.strptime(endDate, "%Y-%m-%d")
 	return (sdate <= idate <= edate)
+
+#get SK data from keys_struct and convert to dict obj
+def getHyperparams(skNum):
+	ksPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
+	skData = []
+	hparams = {}
+	with open(ksPath, 'r') as ksFile:
+		ksFile.readline()
+		for ksLine in ksFile:
+			lineEles = ksLine.strip().split(',')
+			if lineEles[0] == skNum:
+				skData = lineEles
+				break
+	if (len(skData) >= 15):
+		hparams['start_date'] = skData[5]
+		hparams['end_date'] = skData[6]
+		hparams['call'] = skData[7]
+		hparams['learn_rate'] = skData[8]
+		hparams['plateau'] = skData[9]
+		hparams['spd'] = skData[10]
+		hparams['tvi'] = skData[11]
+		hparams['ms_mask'] = skData[12]
+		hparams['ind_mask'] = skData[13]
+		hparams['nar_mask'] = skData[14]
+	return hparams	
 	
 #general funct comparing mask strings
 def compareMasks(baseMask, itrMask):
@@ -74,4 +121,15 @@ def normCleanLine(lineEles, tvi, plateau, indMask, narMask):
 		nline.append(tvNormStr)
 	return matches_nar, nline
 
+#analyze an obj by itr thru its dir() eles
+def inDepthDir(objName, obj):
+	print('======= ', objName, ' =======')
+	eleList = dir(obj)
+	for i in range(len(eleList)):
+		if hasattr(obj, eleList[i]):
+			if callable(getattr(obj, eleList[i])):
+				print(f'    {i}) {eleList[i]} is METHOD')
+			else:
+				print(f'    {i}) {eleList[i]} is ATTR')
+	print('=========================')
 

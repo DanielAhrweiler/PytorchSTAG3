@@ -11,22 +11,13 @@ import AhrUtil as au
 
 
 #get prediction list for single date
-def predSingleDate():
+def predSingleDate(skNum):
 	#load hyperparams
-	hparams = {}
-	with open(os.path.join('hparams.txt'), 'r') as hpFile:
-		for hpLine in hpFile:
-			lineEles = hpLine.strip().split(':')
-			if len(lineEles) == 2:
-				key = lineEles[0]
-				value = lineEles[1]
-				hparams[key] = value
-	#print('*** Hyperparams ***\n', hparams)
-	#convert non-string hyperparams
+	hparams = au.getHyperparams(skNum)
+	spd = int(hparams['spd'])
 	tvi = int(hparams['tvi'])
 	plateau = float(hparams['plateau'])
-	#new params needed
-	spd = 10
+	indMask = hparams['ind_mask']
 	
 	#get date to make pred
 	predDate = input("Enter prediction date (YYYY-MM-DD) : ")
@@ -41,17 +32,18 @@ def predSingleDate():
 			if msDate == predDate:
 				msState = lineEles[2]
 				matches_ms_mask = au.compareMasks(hparams['ms_mask'], msState)
-				print('MS Mask: ', hparams['ms_mask'], '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
+				#print('MS Mask: ', hparams['ms_mask'], '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
 	if not matches_ms_mask:
 		print('Market state does not match for pred date.')
 		sys.exit()
 
 	#load NN, check vals
-	inputSize = 24
-	hiddenSize = 48
+	nnPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'structure', 'struct_'+skNum+'.pt')
+	inputSize = indMask.count('1')
+	hiddenSize = inputSize * 2
 	outputSize = 1
 	mynn = StagNN.H1NN(inputSize, hiddenSize, outputSize)
-	mynn.load_state_dict(torch.load('mynn.pt'))
+	mynn.load_state_dict(torch.load(nnPath))
 
 	#initialize long & short buffers : [0] ticker, [1] nn calc val, [2] actual val
 	bdPath = os.path.join('..', '..', 'DB_Intrinio', 'Clean', 'ByDate', predDate+'.txt')
@@ -103,9 +95,9 @@ def predSingleDate():
 							minIdx = i
 				#update short buf
 				if outputVal < maxVal:
-					shortBuf[minIdx][0] = ticker
-					shortBuf[minIdx][1] = outputVal
-					shortBuf[minIdx][2] = actualVal
+					shortBuf[maxIdx][0] = ticker
+					shortBuf[maxIdx][1] = outputVal
+					shortBuf[maxIdx][2] = actualVal
 					maxVal = 0.0
 					for i in range(len(shortBuf)):
 						if shortBuf[i][1] > maxVal:
@@ -133,10 +125,9 @@ def predSingleDate():
 #get prediction list for single date
 def predSingleDate2(predDate, hparams, mynn):
 	#convert non-string hyperparams
+	spd = int(hparams['spd'])
 	tvi = int(hparams['tvi'])
 	plateau = float(hparams['plateau'])
-	#new params needed
-	spd = 10
 	
 	#determine if dates MS State matches MS Mask hparam
 	matches_ms_mask = False
@@ -148,7 +139,7 @@ def predSingleDate2(predDate, hparams, mynn):
 			if msDate == predDate:
 				msState = lineEles[2]
 				matches_ms_mask = au.compareMasks(hparams['ms_mask'], msState)
-				print('MS Mask: ', hparams['ms_mask'], '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
+				#print('MS Mask: ', hparams['ms_mask'], '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
 	if not matches_ms_mask:
 		print('Market state does not match for pred date.')
 		sys.exit()
@@ -203,9 +194,9 @@ def predSingleDate2(predDate, hparams, mynn):
 							minIdx = i
 				#update short buf
 				if outputVal < maxVal:
-					shortBuf[minIdx][0] = ticker
-					shortBuf[minIdx][1] = outputVal
-					shortBuf[minIdx][2] = actualVal
+					shortBuf[maxIdx][0] = ticker
+					shortBuf[maxIdx][1] = outputVal
+					shortBuf[maxIdx][2] = actualVal
 					maxVal = 0.0
 					for i in range(len(shortBuf)):
 						if shortBuf[i][1] > maxVal:
@@ -226,52 +217,31 @@ def predSingleDate2(predDate, hparams, mynn):
 
 
 #show line plot showing performance of NN over time
-def predPerformance():
+def predPerformance(skNum):
 	#load hyperparams
-	hparams = {}
-	with open(os.path.join('hparams.txt'), 'r') as hpFile:
-		for hpLine in hpFile:
-			lineEles = hpLine.strip().split(':')
-			if len(lineEles) == 2:
-				key = lineEles[0]
-				value = lineEles[1]
-				hparams[key] = value
+	hparams = au.getHyperparams(skNum)
 	#print('*** Hyperparams ***\n', hparams)
-	#convert non-string hyperparams
+	#initalize hyperparams
+	spd = int(hparams['spd'])
 	tvi = int(hparams['tvi'])
 	plateau = float(hparams['plateau'])
-	#new params needed
-	spd = 10
+	msMask = hparams['ms_mask']
+	indMask = hparams['ind_mask']
 	
 	#get date range
 	sdate = input('Enter Start Date (YYYY-MM-DD) : ')
 	edate = input('Enter End Date (YYYY-MM-DD) : ')
-	dates = au.getDatesBetween(sdate, edate)
-
-	#determine if dates MS State matches MS Mask hparam
-	msDates = []
-	matches_ms_mask = False
-	msPath = os.path.join('..', 'in', 'mstates.txt')
-	with open(msPath, 'r') as msFile:
-		for msLine in msFile:
-			lineEles = msLine.strip().split(',')
-			msDate = lineEles[0]
-			date_in_range = au.isDateInRange(msDate, sdate, edate)
-			if date_in_range:
-				msState = lineEles[2]
-				matches_ms_mask = au.compareMasks(hparams['ms_mask'], msState)
-				print('MS Mask: ', hparams['ms_mask'], '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
-				if matches_ms_mask:
-					msDates.append(msDate)
-	msDates.reverse()
+	#dates = au.getDatesBetween(sdate, edate)
+	msDates = au.getDatesBetweenAndMS(sdate, edate, msMask)
 	print('*** Dates To Apply Performance ***\n', msDates)
 
 	#load NN, check vals
-	inputSize = 24
-	hiddenSize = 48
+	nnPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'structure', 'struct_'+skNum+'.pt')
+	inputSize = indMask.count('1')
+	hiddenSize = inputSize * 2
 	outputSize = 1
 	mynn = StagNN.H1NN(inputSize, hiddenSize, outputSize)
-	mynn.load_state_dict(torch.load('mynn.pt'))
+	mynn.load_state_dict(torch.load(nnPath))
 
 	#get perf vals from every date and struct it for time-series plot
 	tsDates = []
@@ -282,15 +252,22 @@ def predPerformance():
 		tsDates.append(dt.strptime(itrDate, "%Y-%m-%d"))
 		tsLongVals.append(tsLongVals[-1] + avgPredLong)
 		tsShortVals.append(tsShortVals[-1] + avgPredShort)
+		print('===== ', itrDate, ' =====')
+		print('--> avgPredLong  = ', avgPredLong)
+		print('--> avgPredShort = ', avgPredShort)
+	tsLongVals = tsLongVals[1:]
+	tsShortVals = tsShortVals[1:]
+	print('--> tsLongVals  : ', tsLongVals)
+	print('--> tsShortVals : ', tsShortVals)
 
 	#plot time-series
 	fig, (longPlot, shortPlot) = plt.subplots(2)
-	longPlot.plot(tsDates, tsLongVals[1:], marker = 'o')
+	longPlot.plot(tsDates, tsLongVals, marker = 'o')
 	longPlot.set_xlabel('Date')
 	longPlot.set_ylabel('APAPT')
 	longPlot.set_title('Perf of Long Trades')
 	longPlot.grid(True)
-	shortPlot.plot(tsDates, tsShortVals[1:], marker = 'o')
+	shortPlot.plot(tsDates, tsShortVals, marker = 'o')
 	shortPlot.set_xlabel('Date')
 	shortPlot.set_ylabel('APAPT')
 	shortPlot.set_title('Perf of Short Trades')
@@ -301,21 +278,25 @@ def predPerformance():
 
 
 #plot histogram plots for actual and calced TV values
-def targetVarHist():
+def targetVarHist(skNum):
+	#load hyperparams
+	hparams = au.getHyperparams(skNum)
 	#load NN
-	inputSize = 24
-	hiddenSize = 48
+	nnPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'structure', 'struct_'+skNum+'.pt')
+	inputSize = hparams['ind_mask'].count('1')
+	hiddenSize = inputSize * 2
 	outputSize = 1
 	mynn = StagNN.H1NN(inputSize, hiddenSize, outputSize)
-	mynn.load_state_dict(torch.load('mynn.pt'))
+	mynn.load_state_dict(torch.load(nnPath))
 	#relv vars
-	sdate = '2016-01-01'
-	edate = '2020-12-31'
-	tvi = 0
-	plateau = 15.0
-	indMask = '111111111111111111111111'
-	narMask = '1111'
-	dates = au.getDatesBetween(sdate, edate)
+	sdate = hparams['start_date']
+	edate = hparams['end_date']
+	tvi = int(hparams['tvi'])
+	plateau = float(hparams['plateau'])
+	msMask = hparams['ms_mask']
+	indMask = hparams['ind_mask']
+	narMask = hparams['nar_mask']
+	dates = au.getDatesBetweenAndMS(sdate, edate, msMask)
 	#get the target var values
 	actualTVs = []
 	calcedTVs = []
@@ -368,8 +349,54 @@ def targetVarHist():
 	plt.tight_layout()
 	plt.show()
 
-#TODO add funct that plots recent DMC for a specific stock/date
-def recentDMC():
+#plots recent DMC for a specific stock/date
+def stockDMC():
+	#get user input
+	ticker = input('Enter Ticker : ')
+	date = input('Enter Date : ')
+	#init data range
+	lbPeriod = 22
+	dates = []
+	with open(os.path.join('..', 'in', 'open_dates.txt'), 'r') as odFile:
+		for odLine in odFile:
+			lineEles = odLine.strip().split(',')
+			dates.append(lineEles[0])
+	dates.reverse()
+	dateIdx = dates.index(date)
+	if dateIdx > lbPeriod:
+		dates = dates[dateIdx-lbPeriod:dateIdx+1]
+	else:
+		dates = dates[:dateIdx+1]
+	#init DMCs
+	dmcs = []
+	for idate in dates:
+		dmcs.append(0.0)
+	#get DMC from SBase file
+	sbPath = os.path.join('..', '..', 'DB_Intrinio', 'Main', 'S_Base', ticker+'.txt')
+	with open(sbPath, 'r') as sbFile:
+		for sbLine in sbFile:
+			lineEles = sbLine.strip().split('~')
+			sbDate = lineEles[0]
+			sbDMC = float(lineEles[6]) / 1000000.0
+			if sbDate in dates:
+				dmcs[dates.index(sbDate)] = sbDMC
+	#print median DMC val
+	print('Median ', ticker, ' DMC : ', statistics.median(dmcs))
+	#plot the data
+	plt.plot(dates, dmcs, marker = 'o')
+	plt.title('DMC Day by Day')
+	plt.xlabel('Date')
+	plt.ylabel('Daily Market Cap (in millions $)')
+	plt.xticks(rotation = 90)
+	#plt.subplots_adjust(bottom = 0.2)
+	plt.grid(True)
+	plt.tight_layout()
+	plt.show()
+				
+
+
+#TODO add funct that plots all stocks DMCs for a single date
+def dateDMC():
 	pass
 
 
@@ -382,8 +409,17 @@ promptIn = """***** Analyzer Option *****
 Enter : """
 pick = int(input(promptIn))
 
-picks = [predSingleDate]
-picks.append(predPerformance)
-picks.append(targetVarHist)
-picks.append(recentDMC)
-picks[pick-1]()
+if pick == 1:
+	skNum = (input('Enter SK Number : ')).strip()
+	predSingleDate(skNum)
+elif pick == 2:
+	skNum = (input('Enter SK Number : ')).strip()
+	predPerformance(skNum)
+elif pick == 3:
+	skNum = (input('Enter SK Number : ')).strip()
+	targetVarHist(skNum)
+elif pick == 4:
+	stockDMC()
+else:
+	print('Invalid selection.')
+
