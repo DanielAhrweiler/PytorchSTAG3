@@ -4,7 +4,7 @@ from datetime import datetime as dt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import StagNN
+import StagNN as stag
 import AhrUtil as au
 
 #======= Functions =======
@@ -89,6 +89,7 @@ bdBasePath = os.path.join('..', '..', 'DB_Intrinio', 'Clean', 'ByDate')
 linesPerSection = 10048
 sectionNum = 0
 tfSection = []
+tvVals = []
 for itrDate in evenDates:
 	bdFullPath = os.path.join(bdBasePath, itrDate+'.txt')
 	with open(bdFullPath, 'r') as bdFile:
@@ -97,6 +98,8 @@ for itrDate in evenDates:
 			matches_nar, nline = au.normCleanLine(lineEles, tvi, plateau, indMask, narMask)
 			tfLine = nline[1:]
 			if matches_nar:
+				#track TV value
+				tvVals.append(float(nline[-1]))
 				#add line to sections, update if needed
 				tfSection.append(tfLine)
 				#print('tfLine: ', tfLine, '  |  tfSection len: ', len(tfSection))
@@ -190,29 +193,55 @@ class AhrLoss(nn.Module):
 		return lossScalar
 
 
+#get user selection for ANN type
+#maybe always do both?
+promptIn = """--> Select ANN type to train ...
+    1) Regression
+    2) Classification
+Enter: """
+#pick = int(input(promptIn))
+#is_regressor = True
+#if pick == 2:
+#	is_regressor = False
 
 #calc nodes in inputlayer & hiddenlayer
 inputSize = indMask.count('1')
 hiddenSize = inputSize * 2
-outputSize = 1
+regOutputSize = 1
+clsOutputSize = 3
+hiddenSizes = [55]
 #other hyperparams
-learnRate = 0.001
-numOfEpochs = 3
+learnRate = 0.05
+numOfEpochs = 10
 trainBatchSize = 64
 validBatchSize = linesPerSection
-errLog = []
+regErrLog = []
+clsMeta = torch.zeros(clsOutputSize,3)
+clsErrLog = []
+#calc classification NN threshold lvls (according to clsOutputSize)
+tvVals = sorted(tvVals)
+clsStepSize = float(len(tvVals) / clsOutputSize)
+clsIncrement = 0.0
+clsThresholds = []
+for i in range(clsOutputSize-1):
+	clsIncrement += clsStepSize
+	clsIdx = round(clsIncrement-1.0)
+	clsThresholds.append(tvVals[clsIdx])
 
 #create instance of neural network
-mynn = StagNN.H1NN(inputSize, hiddenSize, outputSize)
+regNN = stag.Regressor1(inputSize, hiddenSize, regOutputSize)
+clsNN = stag.ClassifierX(inputSize, hiddenSizes, clsOutputSize)
 #au.inDepthDir('mynn', mynn)
 
 #create loss funct and optimizer
 #criterionMSE = nn.MSELoss()
 #au.inDepthDir('criterion MSE', criterionMSE)
-criterion = AhrLoss()
+regCriterion = AhrLoss()
+clsCriterion = nn.CrossEntropyLoss()
 #au.inDepthDir('criterion Ahr', criterion)
 
-optimizer = optim.SGD(mynn.parameters(), lr=learnRate)
+regOptimizer = optim.SGD(regNN.parameters(), lr=learnRate)
+clsOptimizer = optim.SGD(clsNN.parameters(), lr=learnRate)
 
 #train the neural network
 avgTrainErr = 0.0
@@ -224,62 +253,92 @@ validLineCount = 0
 for epoch in range(numOfEpochs):
 	for i in range(len(trainFileList)):
 		#read in data from sec file and translate to tensor
-		fspaceTensor, targetTensor = fileToTensors(os.path.join(custTrainPath, trainFileList[i]), trainBatchSize)
-		#fspaceTensor.requires_grad_(True)
-		#print('fspaceTensor requires_grad = ', fspaceTensor.requires_grad)
-		#print('fspaceTensor grad_fn = ', fspaceTensor.grad_fn)
+		fspaceTensor, regTargetTensor = fileToTensors(os.path.join(custTrainPath, trainFileList[i]), trainBatchSize)
+		clsTargetTensor = au.binTargetTensor(regTargetTensor, clsThresholds)
+		#print('regTargetTensor : ', regTargetTensor)
+		#print('clsTargetTensor : ', clsTargetTensor)
 		for j in range(len(fspaceTensor)):
+			regTT = regTargetTensor[j]
+			clsTT = clsTargetTensor[j].squeeze().to(torch.long)
 			#forward pass
-			output = mynn(fspaceTensor[j])
-			print('An output : ', output[-1, -1])
-			#print('output requires_grad = ', output.requires_grad)
-			#print('output grad_fn = ', output.grad_fn)
-			#print('targetTensor requires_grad = ', targetTensor.requires_grad)
-			#print('targetTensor grad_fn = ', targetTensor.grad_fn)
-			loss = criterion(output, targetTensor[j])
+			regOut = regNN(fspaceTensor[j])
+			clsOut = clsNN(fspaceTensor[j])
+			#print('--> clsOut[0] : ', clsOut[0])
+			#print('--> clsOut shape : ', clsOut.shape)
+			#print('--> regTT[0] : ', regTT[0])
+			#print('--> clsTT[0] : ', clsTT[0])
+			#print('--> clsTT shape : ', clsTT.shape)
+			regLoss = regCriterion(regOut, regTT)
+			clsLoss = clsCriterion(clsOut, clsTT)
 			#loss = custLoss(output, targetTensor[j])
 			#backward pass and optimization
-			optimizer.zero_grad()
-			loss.backward()
-			optimizer.step()
-			avgTrainErr += loss.item()
+			regOptimizer.zero_grad()
+			clsOptimizer.zero_grad()
+			regLoss.backward()
+			clsLoss.backward()
+			regOptimizer.step()
+			clsOptimizer.step()
+			#update error for regression model
+			avgTrainErr += regLoss.item()
 			trainBatchCount += 1
 			trainLineCount += trainBatchSize
-			if ((trainBatchCount - 1) % 200) == 0:
-				errLogLine = []
-				errLogLine.append('train')
-				errLogLine.append(str(trainBatchCount))
-				errLogLine.append(str(trainLineCount))
-				errLogLine.append(f"{loss.item():.7f}")
-				errLog.append(errLogLine)
-				print(f'--> Train Loss At {trainLineCount} : {loss.item()}')
+			if ((trainBatchCount - 1) % 250) == 0:
+				regErrLogLine = []
+				regErrLogLine.append('train')
+				regErrLogLine.append(str(trainBatchCount))
+				regErrLogLine.append(str(trainLineCount))
+				regErrLogLine.append(f"{regLoss.item():.7f}")
+				regErrLog.append(regErrLogLine)
+				print(f'--> Reg Train Loss At {trainLineCount} : {regLoss.item()}')
+			#update error log for classification model
+			for k in range(len(clsTT)):
+				actualBin = clsTT[k]
+				predBin, is_right_prediction = au.isRightClassificationPrediction(clsOut[k], actualBin)
+				clsMeta[actualBin][0] += 1
+				clsMeta[predBin][1] += 1
+				if is_right_prediction:
+					clsMeta[actualBin][2] += 1
+			if ((trainBatchCount - 1) % 250) == 0:
+				clsErrLogLine = []
+				clsErrLogLine.append('train')
+				clsErrLogLine.append(str(trainLineCount))
+				for mline in clsMeta:
+					for ele in mline:
+						clsErrLogLine.append(str(ele.item()))
+				clsErrLog.append(clsErrLogLine)
+				print(f'--> Cls Train Loss At {trainLineCount} : {clsLoss.item()}')
+				print('--> clsMeta : ', clsMeta)
+			
 		#run through a test section file
 		if i < len(testFileList):
 			testFilePath = os.path.join(custTestPath, testFileList[i])
 			if os.path.exists(testFilePath):
-				fspaceTensor, targetTensor = fileToTensors(testFilePath, validBatchSize)
+				fspaceTensor, regTargetTensor = fileToTensors(testFilePath, validBatchSize)
+				clsTargetTensor = au.binTargetTensor(regTargetTensor, clsThresholds)
+				clsTT = clsTargetTensor[0].squeeze().to(torch.long)
 				#forward pass
 				with torch.no_grad():
-					output = mynn(fspaceTensor[0])
-					loss = criterion(output, targetTensor[0])
+					regOut = regNN(fspaceTensor[0])
+					clsOut = clsNN(fspaceTensor[0])
+					regLoss = regCriterion(regOut, regTargetTensor[0])
+					clsLoss = clsCriterion(clsOut, clsTT)
 					#loss = custLoss(output, targetTensor[0])
-				avgValidErr += loss.item()
+				avgValidErr += regLoss.item()
 				validBatchCount += 1
-				validLineCount += validBatchSize	
-				errLogLine = []
-				errLogLine.append('valid')
-				errLogLine.append(str(validBatchCount))
-				errLogLine.append(str(validLineCount))
-				errLogLine.append(f"{loss.item():.7f}")
-				errLog.append(errLogLine)
-				print(f'--> Valid Loss At {validLineCount} : {loss.item()}')
-				#print(f'Epoch: {epoch+1}, Section: {i}')
-				#print(f'--> Valid Loss: {loss.item()}')
+				validLineCount += validBatchSize
+				regErrLogLine = []
+				regErrLogLine.append('valid')
+				regErrLogLine.append(str(validBatchCount))
+				regErrLogLine.append(str(validLineCount))
+				regErrLogLine.append(f"{regLoss.item():.7f}")
+				regErrLog.append(regErrLogLine)
+				#print(f'--> Reg Valid Loss At {validLineCount} : {regLoss.item()}')
+				#print(f'--> Cls Valid Loss At {validLineCount} : {clsLoss.item()}')
 avgTrainErr = avgTrainErr / trainBatchCount
 avgValidErr = avgValidErr / validBatchCount
 nodeIdx = 7
-itrBias = mynn.hidden1.bias.data[nodeIdx]
-itrWeights = mynn.hidden1.weight.data[nodeIdx]
+itrBias = regNN.hidden1.bias.data[nodeIdx]
+itrWeights = regNN.hidden1.weight.data[nodeIdx]
 print(f'--> HL Node {nodeIdx} Bias : ', itrBias)
 print(f'--> HL Node {nodeIdx} Weights : ', itrWeights)
 print(f'--> Avg Train Loss: {avgTrainErr:.7f}')
@@ -362,15 +421,19 @@ if saveStr.lower() == 'y':
 		kpFile.write(appendStr)
 	print('--> ', kpPath, ' WRITTEN')
 	#write data to struct file
-	torch.save(mynn.state_dict(), structPath1)
-	torch.save(mynn.state_dict(), structPath2)
+	torch.save(regNN.state_dict(), structPath1)
+	torch.save(regNN.state_dict(), structPath2)
 	print('--> ', structPath1, ' WRITTEN')
 	print('--> ', structPath2, ' WRITTEN')
 	#write to error log file
-	au.writeToFile(errorPath1, errLog, ',')
-	au.writeToFile(errorPath2, errLog, ',')
+	au.writeToFile(errorPath1, regErrLog, ',')
+	au.writeToFile(errorPath2, regErrLog, ',')
 	print('--> ', errorPath1, ' WRITTEN')
 	print('--> ', errorPath2, ' WRITTEN')
+else:
+	errorPath3 = os.path.join('..', 'out', 'cls_err_log.txt')
+	au.writeToFile(errorPath3, clsErrLog, ',')
+	print('--> ', errorPath3, ' WRITTEN')
 
 
 

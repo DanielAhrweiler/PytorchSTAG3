@@ -1,4 +1,5 @@
 import os
+import torch
 from datetime import datetime as dt
 
 #get all market dates b/w 2 dates
@@ -71,6 +72,7 @@ def getHyperparams(skNum):
 	
 #general funct comparing mask strings
 def compareMasks(baseMask, itrMask):
+	#compare, base can have 'x', itr cannot
 	is_match = True
 	for c in range(len(itrMask)):
 		if (baseMask[c] != 'x'):
@@ -89,13 +91,38 @@ def writeToFile(fpath, data, delim):
 				toFile.write(csvRow)
 	print('--> writeToFile : ', fpath, '... DONE')
 
+#converts a regression TV tensor (cont vals) into a classification TV tensor (binned)
+def binTargetTensor(regTT, inThresholds):
+	thresholds = inThresholds.copy()
+	thresholds.insert(0, 0.0)
+	thresholds.append(1.01)
+	clsTT = torch.zeros_like(regTT)
+	for batch in range(len(regTT)):
+		for row in range(len(regTT[batch])):
+			itrVal = regTT[batch,row,0]
+			for x in range(len(thresholds)-1):
+				if (itrVal >= thresholds[x]) and (itrVal < thresholds[x+1]):
+					clsTT[batch,row,0] = x
+					break
+	return clsTT
 
+#calcs whether pred is right/wrong from softmax form
+def isRightClassificationPrediction(smTensor, rightBin):
+	maxIdx = smTensor.argmax(dim=0)
+	is_right_pred = False
+	if (maxIdx.item() == rightBin):
+		is_right_pred = True
+	return maxIdx, is_right_pred
+
+#converts ByDate line into ML line, alos returns if line matches a NAR mask
 def normCleanLine(lineEles, tvi, plateau, indMask, narMask):
 	#line index
 	narIdx = len(indMask) + 1
 	tviStartIdx = len(indMask) + 2
 	#check Clean ByDate file for good NAR val
 	narItr = lineEles[narIdx]
+	while (len(narItr) < len(narMask)):
+		narItr = narItr + 'x'
 	matches_nar = compareMasks(narMask, narItr)
 	nline = []
 	nline.append(lineEles[0]) 

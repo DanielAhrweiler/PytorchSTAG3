@@ -217,6 +217,7 @@ def predSingleDate2(predDate, hparams, mynn):
 
 
 #show line plot showing performance of NN over time
+#out: line plots (2 on top of each other)
 def predPerformance(skNum):
 	#load hyperparams
 	hparams = au.getHyperparams(skNum)
@@ -278,6 +279,7 @@ def predPerformance(skNum):
 
 
 #plot histogram plots for actual and calced TV values
+#out: histogram plot (2 on top of each other)
 def targetVarHist(skNum):
 	#load hyperparams
 	hparams = au.getHyperparams(skNum)
@@ -349,7 +351,49 @@ def targetVarHist(skNum):
 	plt.tight_layout()
 	plt.show()
 
+
+#group real TVs in equal groups for binomial ANN
+#out: std out
+def groupRealTVs(skNum, groupNum):
+	#load hyperparams
+	hparams = au.getHyperparams(skNum)
+	sdate = hparams['start_date']
+	edate = hparams['end_date']
+	tvi = int(hparams['tvi'])
+	plateau = float(hparams['plateau'])
+	msMask = hparams['ms_mask']
+	indMask = hparams['ind_mask']
+	narMask = hparams['nar_mask']
+	dates = au.getDatesBetweenAndMS(sdate, edate, msMask)
+	#get the target var values
+	actualTVs = []
+	bdBasePath = os.path.join('..', '..', 'DB_Intrinio', 'Clean', 'ByDate')
+	for itrDate in dates:
+		bdFullPath = os.path.join(bdBasePath, itrDate+'.txt')
+		with open(bdFullPath, 'r') as bdFile:
+			for bdLine in bdFile:
+				lineEles = bdLine.strip().split('~')
+				matches_nar, nline = au.normCleanLine(lineEles, tvi, plateau, indMask, narMask)
+				if matches_nar:
+					actualVal = 0.5
+					if nline[-1] != 'tbd':
+						actualVal = float(nline[-1])				
+					#add vals to lists the will show in plots
+					actualTVs.append(actualVal)
+	actualTVs = sorted(actualTVs)
+	stepSize = float(len(actualTVs) / groupNum)
+	increment = 0.0
+	print('--> actualTVs len =', len(actualTVs))
+	print('Group Z [ 0 ] | value =', actualTVs[0])
+	for i in range(groupNum):
+		increment += stepSize
+		idx = round(increment-1.0)
+		print('Group', i, '[', idx, '] | value =', actualTVs[idx])
+
+
+
 #plots recent DMC for a specific stock/date
+#out : line graph (single)
 def stockDMC():
 	#get user input
 	ticker = input('Enter Ticker : ')
@@ -392,7 +436,46 @@ def stockDMC():
 	plt.grid(True)
 	plt.tight_layout()
 	plt.show()
-				
+
+#plot that show each class's TT rate over being trained	
+#out : line graph (multi)
+def classificationError():
+	elPath = os.path.join('..', 'out', 'cls_err_log.txt')
+	tlCount = []
+	classTTRates = []
+	classNum = 0
+	is_first_line_in_file = True
+	with open(elPath, 'r') as errLog:
+		for elLine in errLog:
+			lineEles = elLine.strip().split(',')
+			if is_first_line_in_file:
+				is_first_line_in_file = False
+				classNum = int((len(lineEles) - 2) / 3)
+				print('In classificationError(), classNum = ', classNum)
+			tlCount.append(lineEles[1])
+			line = []
+			for i in range(classNum):
+				itrTotPred = float(lineEles[2+(1+(i*3))])
+				itrTotRight = float(lineEles[2+(2+(i*3))])
+				itrPercent = 0.0
+				if (itrTotPred != 0.0):
+					itrPercent = (itrTotRight / itrTotPred) * 100.0
+				line.append(itrPercent)
+			classTTRates.append(line)
+	print('--> tlCount : ', tlCount)
+	print('--> classTTRates : ', classTTRates)
+	#create plot
+	xStepSize = round(len(tlCount) / 20)
+	plt.plot(tlCount, classTTRates)
+	plt.title('Correct Class Prediction Rates')
+	plt.xlabel('Train Lines')
+	plt.ylabel('Tot Right / Tot Pred (%)')
+	plt.xticks(rotation = 90)
+	plt.xticks(tlCount[::xStepSize], tlCount[::xStepSize])
+	#plt.subplots_adjust(bottom = 0.2)
+	plt.grid(True)
+	plt.tight_layout()
+	plt.show()
 
 
 #TODO add funct that plots all stocks DMCs for a single date
@@ -405,7 +488,9 @@ promptIn = """***** Analyzer Option *****
   1) Prediction List for Single Date
   2) Performance Over Date Range
   3) Target Var Histogram
-  4) Recent DMC for Single Stock & Date
+  4) Real TV Groupings
+  5) Recent DMC for Single Stock & Date
+  6) Classification Error Plot
 Enter : """
 pick = int(input(promptIn))
 
@@ -419,7 +504,13 @@ elif pick == 3:
 	skNum = (input('Enter SK Number : ')).strip()
 	targetVarHist(skNum)
 elif pick == 4:
+	skNum = (input('Enter SK Number : ')).strip()
+	groupNum = int((input('Enter Groupings : ')).strip())
+	groupRealTVs(skNum, groupNum)
+elif pick == 5:
 	stockDMC()
+elif pick == 6:
+	classificationError()
 else:
 	print('Invalid selection.')
 
