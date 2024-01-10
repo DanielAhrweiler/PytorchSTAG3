@@ -255,19 +255,19 @@ for epoch in range(numOfEpochs):
 		#read in data from sec file and translate to tensor
 		fspaceTensor, regTargetTensor = fileToTensors(os.path.join(custTrainPath, trainFileList[i]), trainBatchSize)
 		clsTargetTensor = au.binTargetTensor(regTargetTensor, clsThresholds)
-		#print('regTargetTensor : ', regTargetTensor)
-		#print('clsTargetTensor : ', clsTargetTensor)
+		print('regTargetTensor : ', regTargetTensor)
+		print('clsTargetTensor : ', clsTargetTensor)
 		for j in range(len(fspaceTensor)):
 			regTT = regTargetTensor[j]
 			clsTT = clsTargetTensor[j].squeeze().to(torch.long)
 			#forward pass
 			regOut = regNN(fspaceTensor[j])
 			clsOut = clsNN(fspaceTensor[j])
-			#print('--> clsOut[0] : ', clsOut[0])
-			#print('--> clsOut shape : ', clsOut.shape)
-			#print('--> regTT[0] : ', regTT[0])
-			#print('--> clsTT[0] : ', clsTT[0])
-			#print('--> clsTT shape : ', clsTT.shape)
+			print('--> clsOut[0] : ', clsOut[0])
+			print('--> clsOut shape : ', clsOut.shape)
+			print('--> regTT[0] : ', regTT[0])
+			print('--> clsTT[0] : ', clsTT[0])
+			print('--> clsTT shape : ', clsTT.shape)
 			regLoss = regCriterion(regOut, regTT)
 			clsLoss = clsCriterion(clsOut, clsTT)
 			#loss = custLoss(output, targetTensor[j])
@@ -332,8 +332,8 @@ for epoch in range(numOfEpochs):
 				regErrLogLine.append(str(validLineCount))
 				regErrLogLine.append(f"{regLoss.item():.7f}")
 				regErrLog.append(regErrLogLine)
-				#print(f'--> Reg Valid Loss At {validLineCount} : {regLoss.item()}')
-				#print(f'--> Cls Valid Loss At {validLineCount} : {clsLoss.item()}')
+				print(f'--> Reg Valid Loss At {validLineCount} : {regLoss.item()}')
+				print(f'--> Cls Valid Loss At {validLineCount} : {clsLoss.item()}')
 avgTrainErr = avgTrainErr / trainBatchCount
 avgValidErr = avgValidErr / validBatchCount
 nodeIdx = 7
