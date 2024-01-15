@@ -45,6 +45,19 @@ def isDateInRange(inDate, startDate, endDate):
 	edate = dt.strptime(endDate, "%Y-%m-%d")
 	return (sdate <= idate <= edate)
 
+#get TVT (train, validation, test) code for basis file
+def tvtCode(inDate, startDate, endDate):
+	code = 0
+	idate = dt.strptime(inDate, "%Y-%m-%d")
+	sdate = dt.strptime(startDate, "%Y-%m-%d")
+	edate = dt.strptime(endDate, "%Y-%m-%d")
+	if (sdate <= idate <= edate):
+		if (idate.day % 2 == 1):
+			code = 1
+	else:
+		code = 2
+	return code
+
 #get SK data from keys_struct and convert to dict obj
 def getHyperparams(skNum):
 	ksPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
@@ -89,7 +102,6 @@ def writeToFile(fpath, data, delim):
 				toFile.write(csvRow + '\n')
 			else:
 				toFile.write(csvRow)
-	print('--> writeToFile : ', fpath, '... DONE')
 
 #converts a regression TV tensor (cont vals) into a classification TV tensor (binned)
 def binTargetTensor(regTT, inThresholds):
@@ -126,6 +138,7 @@ def normCleanLine(lineEles, tvi, plateau, indMask, narMask):
 	matches_nar = compareMasks(narMask, narItr)
 	nline = []
 	nline.append(lineEles[0]) 
+	tvActStr = ''
 	if matches_nar:
 		for c in range(len(indMask)):
 			if indMask[c] == '1':
@@ -135,8 +148,10 @@ def normCleanLine(lineEles, tvi, plateau, indMask, narMask):
 				nline.append(fsStr)
 		#add target var
 		targetVal = 0.0
+		tvActStr = 'tbd'
 		if lineEles[tviStartIdx+tvi] != 'tbd':
 			targetVal = float(lineEles[tviStartIdx+tvi])
+			tvActStr = f"{targetVal:.4f}"
 		if targetVal > plateau:
 			targetVal = plateau
 		if targetVal < (plateau * -1.0):
@@ -146,7 +161,7 @@ def normCleanLine(lineEles, tvi, plateau, indMask, narMask):
 		tvNorm = (1.0/tvRange) * azAppr
 		tvNormStr = f"{tvNorm:.7f}"
 		nline.append(tvNormStr)
-	return matches_nar, nline
+	return matches_nar, nline, tvActStr
 
 #analyze an obj by itr thru its dir() eles
 def inDepthDir(objName, obj):

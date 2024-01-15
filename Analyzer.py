@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 import StagNN
 import AhrUtil as au
+import TrainedKey as tkey
 
 
 #get prediction list for single date
@@ -42,7 +43,7 @@ def predSingleDate(skNum):
 	inputSize = indMask.count('1')
 	hiddenSize = inputSize * 2
 	outputSize = 1
-	mynn = StagNN.H1NN(inputSize, hiddenSize, outputSize)
+	mynn = StagNN.Regressor1(inputSize, hiddenSize, outputSize)
 	mynn.load_state_dict(torch.load(nnPath))
 
 	#initialize long & short buffers : [0] ticker, [1] nn calc val, [2] actual val
@@ -241,7 +242,7 @@ def predPerformance(skNum):
 	inputSize = indMask.count('1')
 	hiddenSize = inputSize * 2
 	outputSize = 1
-	mynn = StagNN.H1NN(inputSize, hiddenSize, outputSize)
+	mynn = StagNN.Regressor1(inputSize, hiddenSize, outputSize)
 	mynn.load_state_dict(torch.load(nnPath))
 
 	#get perf vals from every date and struct it for time-series plot
@@ -288,7 +289,7 @@ def targetVarHist(skNum):
 	inputSize = hparams['ind_mask'].count('1')
 	hiddenSize = inputSize * 2
 	outputSize = 1
-	mynn = StagNN.H1NN(inputSize, hiddenSize, outputSize)
+	mynn = StagNN.Regressor1(inputSize, hiddenSize, outputSize)
 	mynn.load_state_dict(torch.load(nnPath))
 	#relv vars
 	sdate = hparams['start_date']
@@ -482,9 +483,21 @@ def classificationError():
 def dateDMC():
 	pass
 
+#temp code, do tests here
+def tempCode():
+	skey = tkey.SingleKey('187')
+	skey.calcKeysPerf()
+	skey = tkey.SingleKey('188')
+	skey.calcKeysPerf()
+	skey = tkey.SingleKey('189')
+	skey.calcKeysPerf()
+	print('--> tempCode ... DONE')
+
+
 
 #get user input
 promptIn = """***** Analyzer Option *****
+  0) Temp Code
   1) Prediction List for Single Date
   2) Performance Over Date Range
   3) Target Var Histogram
@@ -494,7 +507,9 @@ promptIn = """***** Analyzer Option *****
 Enter : """
 pick = int(input(promptIn))
 
-if pick == 1:
+if pick == 0:
+	tempCode()
+elif pick == 1:
 	skNum = (input('Enter SK Number : ')).strip()
 	predSingleDate(skNum)
 elif pick == 2:

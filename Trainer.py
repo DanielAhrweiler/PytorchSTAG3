@@ -37,14 +37,14 @@ def fileToTensors(fpath, batchSize):
 #======= Data Management =======
 
 #define vars for custom db
-startDate = '2016-01-01'
-endDate = '2020-12-31'
+startDate = '2018-01-01'
+endDate = '2023-06-01'
 spd = 10
-tvi = 6
-plateau = 15.0
+tvi = 0
+plateau = 10.0
 msMask = 'xxxxxx0x'
 indMask = '111111111111111111111111'
-narMask = '1111'
+narMask = '11111'
 dbSizes = [[msMask, indMask, str(tvi), '1']]
 dbSizes.append([startDate, endDate])
 dbSizes.append([])
@@ -56,7 +56,7 @@ trainFileList = os.listdir(custTrainPath)
 for itrFile in trainFileList:
 	itrFilePath = os.path.join(custTrainPath, itrFile)
 	os.remove(itrFilePath)
-custTestPath = os.path.join('..', 'data', 'ml', 'ann', 'cust', 'test')
+custTestPath = os.path.join('..', 'data', 'ml', 'ann', 'cust', 'valid')
 testFileList = os.listdir(custTestPath)
 for itrFile in testFileList:
 	itrFilePath = os.path.join(custTestPath, itrFile)
@@ -95,7 +95,7 @@ for itrDate in evenDates:
 	with open(bdFullPath, 'r') as bdFile:
 		for bdLine in bdFile:
 			lineEles = bdLine.strip().split('~')
-			matches_nar, nline = au.normCleanLine(lineEles, tvi, plateau, indMask, narMask)
+			matches_nar, nline, tvActStr = au.normCleanLine(lineEles, tvi, plateau, indMask, narMask)
 			tfLine = nline[1:]
 			if matches_nar:
 				#track TV value
@@ -127,7 +127,7 @@ for itrDate in oddDates:
 	with open(bdFullPath, 'r') as bdFile:
 		for bdLine in bdFile:
 			lineEles = bdLine.strip().split('~')
-			matches_nar, nline = au.normCleanLine(lineEles, tvi, plateau, indMask, narMask)
+			matches_nar, nline, tvActStr = au.normCleanLine(lineEles, tvi, plateau, indMask, narMask)
 			tfLine = nline[1:]
 			if matches_nar:
 				#add line to sections, update if needed
@@ -135,14 +135,14 @@ for itrDate in oddDates:
 				#print('tfLine: ', tfLine, '  |  tfSection len: ', len(tfSection))
 				if len(tfSection) >= linesPerSection:
 					fname = 'sec'+str(sectionNum)+'.txt'
-					secPath = os.path.join('..', 'data', 'ml', 'ann', 'cust', 'test', fname)
+					secPath = os.path.join('..', 'data', 'ml', 'ann', 'cust', 'valid', fname)
 					au.writeToFile(secPath, tfSection, ',')
 					sectionNum += 1
 					tfSection = []
 #write remaining data in tfSection to file
 if len(tfSection) > 0:
 	fname = 'sec'+str(sectionNum)+'.txt'
-	secPath = os.path.join('..', 'data', 'ml', 'ann', 'cust', 'test', fname)
+	secPath = os.path.join('..', 'data', 'ml', 'ann', 'cust', 'valid', fname)
 	au.writeToFile(secPath, tfSection, ',')
 	dbSizes[2].append(str(((sectionNum+1) * linesPerSection) + len(tfSection)))
 	dbSizes[3].append(str(sectionNum+1))
@@ -430,6 +430,14 @@ if saveStr.lower() == 'y':
 	au.writeToFile(errorPath2, regErrLog, ',')
 	print('--> ', errorPath1, ' WRITTEN')
 	print('--> ', errorPath2, ' WRITTEN')
+	#write to basis file
+	skShort = tkey.SingleKey(str(newSK))
+	skShort.createBasisFile()
+	skLong = tkey.SingleKey(str(newSK+1))	
+	skLong.createBasisFile()
+	#calc perf and replace PH w/ real vals in keys_perf
+	skShort.calcKeysPerf()
+	skLong.calcKeysPerf()
 else:
 	errorPath3 = os.path.join('..', 'out', 'cls_err_log.txt')
 	au.writeToFile(errorPath3, clsErrLog, ',')
