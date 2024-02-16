@@ -1,4 +1,5 @@
 import os
+import sys
 import math
 from datetime import datetime as dt
 import torch
@@ -6,6 +7,8 @@ import torch.nn as nn
 import torch.optim as optim
 import StagNN as stag
 import AhrUtil as au
+import TrainedKey as tkey
+from FCI import FCI
 
 #======= Functions =======
 
@@ -33,6 +36,16 @@ def fileToTensors(fpath, batchSize):
 	targetTensor = torch.tensor(target)
 	return fspaceTensor, targetTensor
 
+#check all data in an ANN for nan values
+def checkNansInNN(mynn):
+	#[0] HL weights, [1] HL biases, [2] OL weights, [3] OL biases
+	has_nans = [False, False, False, False]
+	has_nans[0] = torch.isnan(mynn.hidden1.weight).any().item()
+	has_nans[1] = torch.isnan(mynn.hidden1.bias).any().item()
+	has_nans[2] = torch.isnan(mynn.output.weight).any().item()
+	has_nans[3] = torch.isnan(mynn.output.bias).any().item()
+	return has_nans
+
 
 #======= Data Management =======
 
@@ -40,11 +53,11 @@ def fileToTensors(fpath, batchSize):
 startDate = '2018-01-01'
 endDate = '2023-06-01'
 spd = 10
-tvi = 0
-plateau = 10.0
+tvi = 4
+plateau = 15.0
 msMask = 'xxxxxx0x'
 indMask = '111111111111111111111111'
-narMask = '11111'
+narMask = '1111x'
 dbSizes = [[msMask, indMask, str(tvi), '1']]
 dbSizes.append([startDate, endDate])
 dbSizes.append([])
@@ -65,12 +78,13 @@ for itrFile in testFileList:
 inRangeDates = au.getDatesBetween(startDate, endDate)
 #[2] filter dates based on msMask
 msDates = []
-msPath = os.path.join('..', 'in', 'mstates.txt')
+msPath = os.path.join('.', '..', 'in', 'mstates.txt')
+fciMS = FCI(False, msPath)
 with open(msPath, 'r') as msFile:
 	for msLine in msFile:
 		lineEles = msLine.strip().split(',')
-		dateItr = lineEles[0]
-		msItr = lineEles[2]
+		dateItr = lineEles[fciMS.getIdx('date')]
+		msItr = lineEles[fciMS.getIdx('ms_mask')]
 		if (dateItr in inRangeDates) and (au.compareMasks(msMask, msItr)):
 			msDates.append(dateItr)
 #print('--> All MS Dates : ', msDates)
@@ -167,30 +181,54 @@ class AhrLoss(nn.Module):
 		super(AhrLoss, self).__init__()
 
 	def forward(self, predVals, actVals):
+		#print('===== AhrLoss =====')
+		#print('-> predVals mean = ', torch.mean(predVals))
+		#print('-> predVals stddev = ', torch.std(predVals))
+		#print('-> predVals = ', predVals)
+		#print('-> actVals mean = ', torch.mean(actVals))
+		#print('-> actVals stddev = ', torch.std(actVals))
+		#print('-> actVals = ', actVals)
 		#slopes and intercepts
 		m1 = 1.0
 		b1 = 0.0
 		m2 = -1.0 / m1
 		b2 = torch.sub(predVals, (m2 * actVals))
+		#print('-> b2 = ', b2)
 		#calc intersection of the 2 lines
 		intersectionX = (b2 - b1) / (m1 - m2)
 		intersectionY = (m1 * intersectionX) + b1
+		#print('-> intersectionX = ', intersectionX, '\n-> intersectionY = ', intersectionY)
 		#pythagorean theorem
 		distX = torch.sub(intersectionX, actVals) ** 2
 		distY = torch.sub(intersectionY, predVals) ** 2
+		#print('-> distX = ', distX, '\n-> distY = ', distY)
 		distance = torch.add(distX, distY)
+		#print('-> distance (1) = ', distance)
 		distance = torch.sqrt(distance)
+		#print('-> distance (2) = ', distance)
 		#mimic math function : y = | -(x^2) + 0.1767766953 |
 		xic = 0.420488
 		yic = 0.1767766953
 		newPV = predVals * (xic * 2.0)
+		#print('-> newPV (1) = ', newPV)
 		newPV = newPV - xic
+		#print('-> newPV (2) = ', newPV)
 		extraErr = torch.abs((-1.0 * (newPV ** 2)) + yic)
+		#print('-> extraErr = ', extraErr)
 		#calc loss
 		loss = torch.add(distance, extraErr)
-		lossScalar = torch.sum(loss) / loss.numel()
+		#print('-> loss = ', loss)
+		#lossScalar = torch.sum(loss) / loss.numel()
+		sumOfLoss = torch.sum(loss)
+		numOfEles = loss.numel()
+		lossScalar = sumOfLoss / numOfEles
+		#print(f'-> lossScalar = {sumOfLoss:.5f} / {numOfEles} = {lossScalar:.5f}')
+		#print('====================')
 		#print('lossScalar : ', lossScalar)
-		return lossScalar
+		if (0.0 <= lossScalar <= 15.0):
+			return lossScalar
+		else:
+			sys.exit()
 
 
 #get user selection for ANN type
@@ -211,7 +249,7 @@ regOutputSize = 1
 clsOutputSize = 3
 hiddenSizes = [55]
 #other hyperparams
-learnRate = 0.05
+learnRate = 0.007
 numOfEpochs = 10
 trainBatchSize = 64
 validBatchSize = linesPerSection
@@ -234,15 +272,19 @@ clsNN = stag.ClassifierX(inputSize, hiddenSizes, clsOutputSize)
 #au.inDepthDir('mynn', mynn)
 
 #create loss funct and optimizer
-#criterionMSE = nn.MSELoss()
+criterionMSE = nn.MSELoss()
+#regCriterion = AhrLoss()
+regCriterion = nn.MSELoss()
+#au.inDepthDir('criterion Ahr', regCriterion)
 #au.inDepthDir('criterion MSE', criterionMSE)
-regCriterion = AhrLoss()
 clsCriterion = nn.CrossEntropyLoss()
-#au.inDepthDir('criterion Ahr', criterion)
 
 regOptimizer = optim.SGD(regNN.parameters(), lr=learnRate)
 clsOptimizer = optim.SGD(clsNN.parameters(), lr=learnRate)
 
+#clear grad desc debug file
+open('debug_gd.txt', 'w').close()
+debugLineCount = 0
 #train the neural network
 avgTrainErr = 0.0
 avgValidErr = 0.0
@@ -251,63 +293,263 @@ validBatchCount = 0
 trainLineCount = 0
 validLineCount = 0
 for epoch in range(numOfEpochs):
+	fstCount = 0	#feature space tensor count (for gd debug)
 	for i in range(len(trainFileList)):
+		print(f'=========== Train File {i} (epoch:{epoch}) ==========')
 		#read in data from sec file and translate to tensor
 		fspaceTensor, regTargetTensor = fileToTensors(os.path.join(custTrainPath, trainFileList[i]), trainBatchSize)
 		clsTargetTensor = au.binTargetTensor(regTargetTensor, clsThresholds)
-		print('regTargetTensor : ', regTargetTensor)
-		print('clsTargetTensor : ', clsTargetTensor)
+		print(f'fspaceTensor shape : {fspaceTensor.shape}')
+		print(f'fspaceTensor has nan : {torch.isnan(fspaceTensor).any().item()}')
+		print(f'regTargetTensor shape : {regTargetTensor.shape}')
+		print(f'regTargetTensor has nan : {torch.isnan(regTargetTensor).any().item()}')
+		print(f'clsTargetTensor shape : {clsTargetTensor.shape}')
+		print(f'clsTargetTensor has nan : {torch.isnan(clsTargetTensor).any().item()}')
 		for j in range(len(fspaceTensor)):
+			print(f'--> fspaceTensor[{j}] shape : {fspaceTensor[j].shape}')
 			regTT = regTargetTensor[j]
 			clsTT = clsTargetTensor[j].squeeze().to(torch.long)
+
+			#========= DEBUG ===========
+			debugLineCount += 1
+			#print(f'--> Before FF : {checkNansInNN(regNN)}')
+			hasNans = checkNansInNN(regNN)
+			debugLineStr = ''
+			debugLineStr += str(debugLineCount)+','
+			debugLineStr += str(epoch)+','
+			debugLineStr += str(fstCount)+','
+			debugLineStr += '0,'
+			debugLineStr += str(hasNans[0])+','
+			debugLineStr += str(hasNans[1])+','
+			debugLineStr += str(hasNans[2])+','
+			debugLineStr += str(hasNans[3])+','
+			for name, param in regNN.named_parameters():
+				if param.grad is not None:
+					debugLineStr += f'{param.grad.norm().item():.5f},'
+				else:
+					debugLineStr += '0.0,'
+			debugLineStr = debugLineStr[:-1]
+			debugLineStr += '\n'
+			with open('debug_gd.txt', 'a') as debugFile:
+				debugFile.write(debugLineStr)	
+			#===========================
+
 			#forward pass
 			regOut = regNN(fspaceTensor[j])
+			if (torch.isnan(regOut).any().item()):
+				print('!!! regOut has nan values !!!')
+
+			#========= DEBUG ===========
+			debugLineCount += 1
+			#print(f'--> After FF : {checkNansInNN(regNN)}')
+			hasNans = checkNansInNN(regNN)
+			debugLineStr = ''
+			debugLineStr += str(debugLineCount)+','
+			debugLineStr += str(epoch)+','
+			debugLineStr += str(fstCount)+','
+			debugLineStr += '1,'
+			debugLineStr += str(hasNans[0])+','
+			debugLineStr += str(hasNans[1])+','
+			debugLineStr += str(hasNans[2])+','
+			debugLineStr += str(hasNans[3])+','
+			for name, param in regNN.named_parameters():
+				if param.grad is not None:
+					debugLineStr += f'{param.grad.norm().item():.5f},'
+				else:
+					debugLineStr += '0.0,'
+			debugLineStr = debugLineStr[:-1]
+			debugLineStr += '\n'
+			with open('debug_gd.txt', 'a') as debugFile:
+				debugFile.write(debugLineStr)	
+			#===========================		
+
 			clsOut = clsNN(fspaceTensor[j])
-			print('--> clsOut[0] : ', clsOut[0])
-			print('--> clsOut shape : ', clsOut.shape)
-			print('--> regTT[0] : ', regTT[0])
-			print('--> clsTT[0] : ', clsTT[0])
-			print('--> clsTT shape : ', clsTT.shape)
 			regLoss = regCriterion(regOut, regTT)
 			clsLoss = clsCriterion(clsOut, clsTT)
-			#loss = custLoss(output, targetTensor[j])
+
+			#========= DEBUG ===========
+			debugLineCount += 1
+			#print(f'--> After criterion : {checkNansInNN(regNN)}')
+			hasNans = checkNansInNN(regNN)
+			debugLineStr = ''
+			debugLineStr += str(debugLineCount)+','
+			debugLineStr += str(epoch)+','
+			debugLineStr += str(fstCount)+','
+			debugLineStr += '2,'
+			debugLineStr += str(hasNans[0])+','
+			debugLineStr += str(hasNans[1])+','
+			debugLineStr += str(hasNans[2])+','
+			debugLineStr += str(hasNans[3])+','
+			for name, param in regNN.named_parameters():
+				if param.grad is not None:
+					debugLineStr += f'{param.grad.norm().item():.5f},'
+				else:
+					debugLineStr += '0.0,'
+			debugLineStr = debugLineStr[:-1]
+			debugLineStr += '\n'
+			with open('debug_gd.txt', 'a') as debugFile:
+				debugFile.write(debugLineStr)	
+			#===========================
+
+			#print(f'--> Epoch {epoch}, Loss : {regLoss.item()}')
 			#backward pass and optimization
 			regOptimizer.zero_grad()
 			clsOptimizer.zero_grad()
+
+			#========= DEBUG ===========
+			'''
+			debugLineCount += 1
+			print(f'--> After zero grad : {checkNansInNN(regNN)}')
+			hasNans = checkNansInNN(regNN)
+			debugLineStr = ''
+			debugLineStr += str(debugLineCount)+','
+			debugLineStr += str(epoch)+','
+			debugLineStr += str(fstCount)+','
+			debugLineStr += '3,'
+			debugLineStr += str(hasNans[0])+','
+			debugLineStr += str(hasNans[1])+','
+			debugLineStr += str(hasNans[2])+','
+			debugLineStr += str(hasNans[3])+','
+			for name, param in regNN.named_parameters():
+				if param.grad is not None:
+					debugLineStr += f'{param.grad.norm().item():.5f},'
+			debugLineStr = debugLineStr[:-1]
+			debugLineStr += '\n'
+			with open('debug_gd.txt', 'a') as debugFile:
+				debugFile.write(debugLineStr)	
+			'''
+			#===========================
+
 			regLoss.backward()
+			#for name, param in regNN.named_parameters():
+			#	if param.grad is not None:
+			#		print(f'    Parameter: {name}, Grad Norm: {param.grad.norm().item()} | {param.data.tolist()}')
 			clsLoss.backward()
-			regOptimizer.step()
-			clsOptimizer.step()
-			#update error for regression model
-			avgTrainErr += regLoss.item()
-			trainBatchCount += 1
-			trainLineCount += trainBatchSize
-			if ((trainBatchCount - 1) % 250) == 0:
-				regErrLogLine = []
-				regErrLogLine.append('train')
-				regErrLogLine.append(str(trainBatchCount))
-				regErrLogLine.append(str(trainLineCount))
-				regErrLogLine.append(f"{regLoss.item():.7f}")
-				regErrLog.append(regErrLogLine)
-				print(f'--> Reg Train Loss At {trainLineCount} : {regLoss.item()}')
-			#update error log for classification model
-			for k in range(len(clsTT)):
-				actualBin = clsTT[k]
-				predBin, is_right_prediction = au.isRightClassificationPrediction(clsOut[k], actualBin)
-				clsMeta[actualBin][0] += 1
-				clsMeta[predBin][1] += 1
-				if is_right_prediction:
-					clsMeta[actualBin][2] += 1
-			if ((trainBatchCount - 1) % 250) == 0:
-				clsErrLogLine = []
-				clsErrLogLine.append('train')
-				clsErrLogLine.append(str(trainLineCount))
-				for mline in clsMeta:
-					for ele in mline:
-						clsErrLogLine.append(str(ele.item()))
-				clsErrLog.append(clsErrLogLine)
-				print(f'--> Cls Train Loss At {trainLineCount} : {clsLoss.item()}')
-				print('--> clsMeta : ', clsMeta)
+
+			gd_is_nan = False
+			for name, param in regNN.named_parameters():
+				if param.grad.norm() != param.grad.norm():
+					gd_is_nan = True
+			if not gd_is_nan:
+				#========= DEBUG ===========
+				debugLineCount += 1
+				#print(f'--> After backward : {checkNansInNN(regNN)}')
+				hasNans = checkNansInNN(regNN)
+				debugLineStr = ''
+				debugLineStr += str(debugLineCount)+','
+				debugLineStr += str(epoch)+','
+				debugLineStr += str(fstCount)+','
+				debugLineStr += '4,'
+				debugLineStr += str(hasNans[0])+','
+				debugLineStr += str(hasNans[1])+','
+				debugLineStr += str(hasNans[2])+','
+				debugLineStr += str(hasNans[3])+','
+				for name, param in regNN.named_parameters():
+					if param.grad is not None:
+						debugLineStr += f'{param.grad.norm().item():.5f},'
+					else:
+						debugLineStr += '0.0,'
+				debugLineStr = debugLineStr[:-1]
+				debugLineStr += '\n'
+				with open('debug_gd.txt', 'a') as debugFile:
+					debugFile.write(debugLineStr)	
+				#===========================
+
+				#print gradient val
+				#for name, param in regNN.named_parameters():
+				#	if param.grad is not None:
+				#		print(f'    Parameter: {name}, Grad Norm: {param.grad.norm().item()} | {param.data.tolist()}')
+						#print(f'    Parameter: {name}, Grad Norm: {param.grad.norm().item()}, Param Val: {param.data}')
+						#print(f'    Parameter: {name}, Grad Norm: {param.grad}, Param Val: {param.data.tolist()}')
+				#torch.nn.utils.clip_grad_norm_(regNN.parameters(), max_norm=0.5)
+
+				regOptimizer.step() 	#nan vals start here!
+				#for name, param in regNN.named_parameters():
+				#	if param.grad is not None:
+				#		print(f'    Parameter: {name}, Grad Norm: {param.grad.norm().item()} | {param.data.tolist()}')
+				clsOptimizer.step()
+
+				#========= DEBUG ===========
+				debugLineCount += 1
+				#print(f'--> After opt step : {checkNansInNN(regNN)}')
+				hasNans = checkNansInNN(regNN)
+				debugLineStr = ''
+				debugLineStr += str(debugLineCount)+','
+				debugLineStr += str(epoch)+','
+				debugLineStr += str(fstCount)+','
+				debugLineStr += '5,'
+				debugLineStr += str(hasNans[0])+','
+				debugLineStr += str(hasNans[1])+','
+				debugLineStr += str(hasNans[2])+','
+				debugLineStr += str(hasNans[3])+','
+				for name, param in regNN.named_parameters():
+					if param.grad is not None:
+						debugLineStr += f'{param.grad.norm().item():.5f},'
+					else:
+						debugLineStr += '0.0,'
+				debugLineStr = debugLineStr[:-1]
+				debugLineStr += '\n'
+				with open('debug_gd.txt', 'a') as debugFile:
+					debugFile.write(debugLineStr)	
+				#===========================
+	
+				#update error for regression model
+				avgTrainErr += regLoss.item()
+				trainBatchCount += 1
+				trainLineCount += trainBatchSize
+				if ((trainBatchCount - 1) % 250) == 0:
+					regErrLogLine = []
+					regErrLogLine.append('train')
+					regErrLogLine.append(str(trainBatchCount))
+					regErrLogLine.append(str(trainLineCount))
+					regErrLogLine.append(f"{regLoss.item():.7f}")
+					regErrLog.append(regErrLogLine)
+					print(f'--> Reg Train Loss At {trainLineCount} : {regLoss.item()}')
+				#update error log for classification model
+				for k in range(len(clsTT)):
+					actualBin = clsTT[k]
+					predBin, is_right_prediction = au.isRightClassificationPrediction(clsOut[k], actualBin)
+					clsMeta[actualBin][0] += 1
+					clsMeta[predBin][1] += 1
+					if is_right_prediction:
+						clsMeta[actualBin][2] += 1
+				if ((trainBatchCount - 1) % 250) == 0:
+					clsErrLogLine = []
+					clsErrLogLine.append('train')
+					clsErrLogLine.append(str(trainLineCount))
+					for mline in clsMeta:
+						for ele in mline:
+							clsErrLogLine.append(str(ele.item()))
+					clsErrLog.append(clsErrLogLine)
+					#print(f'--> Cls Train Loss At {trainLineCount} : {clsLoss.item()}')
+					#print(f'--> clsMeta : {clsMeta.tolist()}')
+
+				#========= DEBUG ===========
+				debugLineCount += 1
+				#print(f'--> Last line in train : {checkNansInNN(regNN)}')
+				hasNans = checkNansInNN(regNN)
+				debugLineStr = ''
+				debugLineStr += str(debugLineCount)+','
+				debugLineStr += str(epoch)+','
+				debugLineStr += str(fstCount)+','
+				debugLineStr += '6,'
+				debugLineStr += str(hasNans[0])+','
+				debugLineStr += str(hasNans[1])+','
+				debugLineStr += str(hasNans[2])+','
+				debugLineStr += str(hasNans[3])+','
+				for name, param in regNN.named_parameters():
+					if param.grad is not None:
+						debugLineStr += f'{param.grad.norm().item():.5f},'
+					else:
+						debugLineStr += '0.0,'
+				debugLineStr = debugLineStr[:-1]
+				debugLineStr += '\n'
+				with open('debug_gd.txt', 'a') as debugFile:
+					debugFile.write(debugLineStr)	
+				fstCount += 1
+				#===========================
+			else:
+				fstCount += 1
 			
 		#run through a test section file
 		if i < len(testFileList):
@@ -332,21 +574,22 @@ for epoch in range(numOfEpochs):
 				regErrLogLine.append(str(validLineCount))
 				regErrLogLine.append(f"{regLoss.item():.7f}")
 				regErrLog.append(regErrLogLine)
-				print(f'--> Reg Valid Loss At {validLineCount} : {regLoss.item()}')
-				print(f'--> Cls Valid Loss At {validLineCount} : {clsLoss.item()}')
+				#print(f'--> Reg Valid Loss At {validLineCount} : {regLoss.item()}')
+				#print(f'--> Cls Valid Loss At {validLineCount} : {clsLoss.item()}')
 avgTrainErr = avgTrainErr / trainBatchCount
 avgValidErr = avgValidErr / validBatchCount
 nodeIdx = 7
 itrBias = regNN.hidden1.bias.data[nodeIdx]
 itrWeights = regNN.hidden1.weight.data[nodeIdx]
-print(f'--> HL Node {nodeIdx} Bias : ', itrBias)
-print(f'--> HL Node {nodeIdx} Weights : ', itrWeights)
+print(f'--> HL Node {nodeIdx} Bias : {itrBias}')
+print(f'--> HL Node {nodeIdx} Weights : {itrWeights}')
 print(f'--> Avg Train Loss: {avgTrainErr:.7f}')
 print(f'--> Avg Valid Loss: {avgValidErr:.7f}')
 saveStr = input('Save this ANN Model? (y/n) : ')
 if saveStr.lower() == 'y':
 	#get SK num
-	ksPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
+	ksPath = os.path.join('.', '..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
+	fciKS = FCI(True, ksPath)
 	ksFile = []
 	keysInKS = []
 	with open(ksPath, 'r') as itrFile:
@@ -354,7 +597,7 @@ if saveStr.lower() == 'y':
 		for itrLine in itrFile:
 			data = itrLine.strip().split(',')
 			ksFile.append(data)
-			keysInKS.append(int(data[0]))
+			keysInKS.append(int(data[fciKS.getIdx('sk_num')]))
 	ksFile.insert(0, header)
 	newSK = max(keysInKS)
 	newSK = newSK + 1
@@ -433,15 +676,19 @@ if saveStr.lower() == 'y':
 	#write to basis file
 	skShort = tkey.SingleKey(str(newSK))
 	skShort.createBasisFile()
+	print(f'--> ./../out/sk/baseis/ann/ANN_{str(newSK)}.txt ... WRITTEN')
 	skLong = tkey.SingleKey(str(newSK+1))	
 	skLong.createBasisFile()
+	print(f'--> ./../out/sk/baseis/ann/ANN_{str(newSK+1)}.txt ... WRITTEN')
 	#calc perf and replace PH w/ real vals in keys_perf
 	skShort.calcKeysPerf()
 	skLong.calcKeysPerf()
+	print(f'--> {kpPath} ... UPDATED')
 else:
 	errorPath3 = os.path.join('..', 'out', 'cls_err_log.txt')
 	au.writeToFile(errorPath3, clsErrLog, ',')
 	print('--> ', errorPath3, ' WRITTEN')
+print('--> Trainer.py ... COMPLETE')
 
 
 

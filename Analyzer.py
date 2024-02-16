@@ -9,6 +9,7 @@ import torch.optim as optim
 import StagNN
 import AhrUtil as au
 import TrainedKey as tkey
+from FCI import FCI
 
 
 #get prediction list for single date
@@ -25,13 +26,14 @@ def predSingleDate(skNum):
 
 	#determine if dates MS State matches MS Mask hparam
 	matches_ms_mask = False
-	msPath = os.path.join('..', 'in', 'mstates.txt')
+	msPath = os.path.join('.', '..', 'in', 'mstates.txt')
+	fciMS = FCI(False, msPath)
 	with open(msPath, 'r') as msFile:
 		for msLine in msFile:
 			lineEles = msLine.strip().split(',')
 			msDate = lineEles[0]
 			if msDate == predDate:
-				msState = lineEles[2]
+				msState = lineEles[fciMS.getIdx('ms_mask')]
 				matches_ms_mask = au.compareMasks(hparams['ms_mask'], msState)
 				#print('MS Mask: ', hparams['ms_mask'], '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
 	if not matches_ms_mask:
@@ -39,7 +41,7 @@ def predSingleDate(skNum):
 		sys.exit()
 
 	#load NN, check vals
-	nnPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'structure', 'struct_'+skNum+'.pt')
+	nnPath = os.path.join('.', '..', 'out', 'sk', 'log', 'ann', 'structure', 'struct_'+skNum+'.pt')
 	inputSize = indMask.count('1')
 	hiddenSize = inputSize * 2
 	outputSize = 1
@@ -47,7 +49,7 @@ def predSingleDate(skNum):
 	mynn.load_state_dict(torch.load(nnPath))
 
 	#initialize long & short buffers : [0] ticker, [1] nn calc val, [2] actual val
-	bdPath = os.path.join('..', '..', 'DB_Intrinio', 'Clean', 'ByDate', predDate+'.txt')
+	bdPath = os.path.join('.', '..', '..', 'DB_Intrinio', 'Clean', 'ByDate', predDate+'.txt')
 	longBuf = []
 	shortBuf = []
 	for i in range(spd):
@@ -132,13 +134,15 @@ def predSingleDate2(predDate, hparams, mynn):
 	
 	#determine if dates MS State matches MS Mask hparam
 	matches_ms_mask = False
-	msPath = os.path.join('..', 'in', 'mstates.txt')
+	msPath = os.path.join('.', '..', 'in', 'mstates.txt')
+	fciMS = FCI(False, msPath)
 	with open(msPath, 'r') as msFile:
 		for msLine in msFile:
 			lineEles = msLine.strip().split(',')
+			msDate = lineEles[fciMS.getIdx('date')]
 			msDate = lineEles[0]
 			if msDate == predDate:
-				msState = lineEles[2]
+				msState = lineEles[fciMS.getIdx('ms_mask')]
 				matches_ms_mask = au.compareMasks(hparams['ms_mask'], msState)
 				#print('MS Mask: ', hparams['ms_mask'], '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
 	if not matches_ms_mask:
@@ -220,6 +224,29 @@ def predSingleDate2(predDate, hparams, mynn):
 #show line plot showing performance of NN over time
 #out: line plots (2 on top of each other)
 def predPerformance(skNum):
+	#assert that SK was ran by Python, not by Java
+	skData = []
+	ksPath = os.path.join('.', '..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
+	fciKS = FCI(True, ksPath)
+	with open(ksPath, 'r') as ksFile:
+		for ksLine in ksFile:
+			lineEles = ksLine.strip().split(',')
+			itrKeyNum = lineEles[fciKS.getIdx('sk_num')]
+			if itrKeyNum == skNum:
+				skData = lineEles
+				break
+	if len(skData) > 0:
+		javaOrPython = skData[fciKS.getIdx('language')]
+		print(f'jorp : {javaOrPython}')
+		if javaOrPython != 'python':
+			print('ERR: This SK was not made using Python')
+			return
+	else:
+		print(f'ERR: SK{skNum} not found in keys_struct.txt')
+		return
+	
+			
+
 	#load hyperparams
 	hparams = au.getHyperparams(skNum)
 	#print('*** Hyperparams ***\n', hparams)
@@ -402,10 +429,12 @@ def stockDMC():
 	#init data range
 	lbPeriod = 22
 	dates = []
-	with open(os.path.join('..', 'in', 'open_dates.txt'), 'r') as odFile:
+	odPath = os.path.join('.', '..', 'in', 'open_dates.txt')
+	fciOD = FCI(False, odPath)
+	with open(odPath, 'r') as odFile:
 		for odLine in odFile:
 			lineEles = odLine.strip().split(',')
-			dates.append(lineEles[0])
+			dates.append(lineEles[fciOD.getIdx('date')])
 	dates.reverse()
 	dateIdx = dates.index(date)
 	if dateIdx > lbPeriod:
@@ -417,12 +446,13 @@ def stockDMC():
 	for idate in dates:
 		dmcs.append(0.0)
 	#get DMC from SBase file
-	sbPath = os.path.join('..', '..', 'DB_Intrinio', 'Main', 'S_Base', ticker+'.txt')
+	sbPath = os.path.join('.', '..', '..', 'DB_Intrinio', 'Main', 'S_Base', ticker+'.txt')
+	fciSB = FCI(False, sbPath)
 	with open(sbPath, 'r') as sbFile:
 		for sbLine in sbFile:
 			lineEles = sbLine.strip().split('~')
-			sbDate = lineEles[0]
-			sbDMC = float(lineEles[6]) / 1000000.0
+			sbDate = lineEles[fciSB.getIdx('date')]
+			sbDMC = float(lineEles[fciSB.getIdx('daily_market_cap']) / 1000000.0
 			if sbDate in dates:
 				dmcs[dates.index(sbDate)] = sbDMC
 	#print median DMC val
@@ -485,13 +515,32 @@ def dateDMC():
 
 #temp code, do tests here
 def tempCode():
-	skey = tkey.SingleKey('187')
-	skey.calcKeysPerf()
-	skey = tkey.SingleKey('188')
-	skey.calcKeysPerf()
-	skey = tkey.SingleKey('189')
-	skey.calcKeysPerf()
+	fciKS = FCI(True, './../out/sk/log/ann/keys_struct.txt')
+	print('--> FCI ks cols : ', fciKS.getTags())
+	print('--> FCI ks TVI idx : ', fciKS.getIdx('tvi'))	
 	print('--> tempCode ... DONE')
+
+def decode(message_file):
+	lines = []
+	with open(message_file) as decodeFile:
+		for line in decodeFile:
+			newLine = []
+			splitLine = line.split()
+			newLine.append(int(splitLine[0]))
+			newLine.append(splitLine[1])
+			lines.append(newLine)
+	sortedLines = sorted(lines, key=lambda x : x[0])
+	index = 0
+	step = 1
+	decodedMessage = ''
+	while (index + step) <= len(sortedLines):
+		index += step
+		decodedMessage += sortedLines[index-1][1] + ' '
+		step += 1
+	print(f'Decoded : {decodedMessage[:-1]}')
+
+	return decodedMessage[:-1]
+		
 
 
 
@@ -504,6 +553,7 @@ promptIn = """***** Analyzer Option *****
   4) Real TV Groupings
   5) Recent DMC for Single Stock & Date
   6) Classification Error Plot
+  7) Code Test
 Enter : """
 pick = int(input(promptIn))
 
@@ -526,6 +576,8 @@ elif pick == 5:
 	stockDMC()
 elif pick == 6:
 	classificationError()
+elif pick == 7:
+	decode('coding_qual_input.txt')
 else:
 	print('Invalid selection.')
 

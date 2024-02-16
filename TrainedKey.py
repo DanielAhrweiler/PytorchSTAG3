@@ -5,6 +5,7 @@ import torch
 import StagNN
 import AhrUtil as au
 from datetime import datetime as dt
+from FCI import FCI
 
 
 #attr and perf metric calculator for single keys
@@ -12,27 +13,28 @@ class SingleKey:
 	#========== CONSTRUCTOR ==========
 	def __init__(self, skNum):
 		self.__id = skNum
-		ksPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
+		ksPath = os.path.join('.', '..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
+		fciKS = FCI(True, ksPath)
 		skData = []
 		self.__hyperparams = {}
 		with open(ksPath, 'r') as ksFile:
 			ksFile.readline()
 			for ksLine in ksFile:
 				lineEles = ksLine.strip().split(',')
-				if lineEles[0] == str(skNum):
+				if lineEles[fciKS.getIdx('sk_num')] == str(skNum):
 					skData = lineEles
 					break
 		if (len(skData) >= 15):
-			self.__hyperparams['start_date'] = skData[5]
-			self.__hyperparams['end_date'] = skData[6]
-			self.__hyperparams['call'] = skData[7]
-			self.__hyperparams['learn_rate'] = skData[8]
-			self.__hyperparams['plateau'] = skData[9]
-			self.__hyperparams['spd'] = skData[10]
-			self.__hyperparams['tvi'] = skData[11]
-			self.__hyperparams['ms_mask'] = skData[12]
-			self.__hyperparams['ind_mask'] = skData[13]
-			self.__hyperparams['nar_mask'] = skData[14]
+			self.__hyperparams['start_date'] = skData[fciKS.getIdx('start_date')]
+			self.__hyperparams['end_date'] = skData[fciKS.getIdx('end_date')]
+			self.__hyperparams['call'] = skData[fciKS.getIdx('call')]
+			self.__hyperparams['learn_rate'] = skData[fciKS.getIdx('learn_rate')]
+			self.__hyperparams['plateau'] = skData[fciKS.getIdx('plateau')]
+			self.__hyperparams['spd'] = skData[fciKS.getIdx('spd')]
+			self.__hyperparams['tvi'] = skData[fciKS.getIdx('tvi')]
+			self.__hyperparams['ms_mask'] = skData[fciKS.getIdx('ms_mask')]
+			self.__hyperparams['ind_mask'] = skData[fciKS.getIdx('ind_mask')]
+			self.__hyperparams['nar_mask'] = skData[fciKS.getIdx('nar_mask')]
 		else:
 			print('--> Len of skData : ', len(skData))
 		#load in NN
@@ -100,13 +102,14 @@ class SingleKey:
 		
 		#[1] determine if dates MS state matches MS mask
 		matches_ms_mask = False
-		msPath = os.path.join('..', 'in', 'mstates.txt')
+		msPath = os.path.join('.', '..', 'in', 'mstates.txt')
+		fciMS = FCI(False, msPath)
 		with open(msPath, 'r') as msFile:
 			for msLine in msFile:
 				lineEles = msLine.strip().split(',')
-				msDate = lineEles[0]
+				msDate = lineEles[fciMS.getIdx('date')]
 				if msDate == predDate:
-					msState = lineEles[2]
+					msState = lineEles[fciMS.getIdx('ms_mask')]
 					matches_ms_mask = au.compareMasks(msMask, msState)
 		if not matches_ms_mask:
 			print('Market state does not match for pred date.')

@@ -10,7 +10,12 @@ class Regressor1(nn.Module):
 		self.sigmoid = nn.Sigmoid()
 
 	def forward(self, x):
+		#print(f'BEFORE | HL Weights = {self.hidden1.weight.tolist()}')
+		#print(f'BEFORE | HL Biases = {self.hidden1.bias.tolist()}')
+		#print(f'BEFORE | HL Outputs = {self.hidden1(x)}')
 		hiddenOut1 = self.sigmoid(self.hidden1(x))
+		#print(f'AFTER | HL Weights = {self.hidden1.weight.tolist()}')
+		#print(f'AFTER | HL Biases = {self.hidden1.bias.tolist()}')
 		output = self.output(hiddenOut1)
 		return output
 

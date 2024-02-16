@@ -1,17 +1,19 @@
 import os
 import torch
 from datetime import datetime as dt
+from FCI import FCI
 
 #get all market dates b/w 2 dates
 def getDatesBetween(startDate, endDate):
 	dates = []
-	odPath = os.path.join('..', 'in', 'open_dates.txt')
+	odPath = os.path.join('.', '..', 'in', 'open_dates.txt')
+	fciOD = FCI(False, odPath)
 	sdate = dt.strptime(startDate, '%Y-%m-%d')
 	edate = dt.strptime(endDate, '%Y-%m-%d')
 	with open(odPath, 'r') as odFile:
 		for odLine in odFile:
 			lineEles = odLine.strip().split(',')
-			itrDate = dt.strptime(lineEles[0], '%Y-%m-%d')
+			itrDate = dt.strptime(lineEles[fciOD.getIdx('date')], '%Y-%m-%d')
 			if ((itrDate >= sdate) & (itrDate <= edate)):
 				dates.append(str(itrDate.date()))
 	return dates
@@ -22,15 +24,16 @@ def getDatesBetweenAndMS(sdate, edate, msMask):
 	print('edate : ', edate)
 	print('msMask : ', msMask)
 	msDates = []
-	msPath = os.path.join('..', 'in', 'mstates.txt')
+	msPath = os.path.join('.', '..', 'in', 'mstates.txt')
+	fciMS = FCI(False, msPath)
 	with open(msPath, 'r') as msFile:
 		for msLine in msFile:
 			lineEles = msLine.strip().split(',')
-			msDate = lineEles[0]
+			msDate = lineEles[fciMS.getIdx('date')]
 			matches_ms_mask = False
 			date_in_range = isDateInRange(msDate, sdate, edate)
 			if date_in_range:
-				msState = lineEles[2]
+				msState = lineEles[fciMS.getIdx('ms_mask')]
 				matches_ms_mask = compareMasks(msMask, msState)
 				#print('MS Mask: ', msMask, '  |  MS Itr: ', msState, '  |  Match: ', matches_ms_mask)
 				if matches_ms_mask:
@@ -60,27 +63,28 @@ def tvtCode(inDate, startDate, endDate):
 
 #get SK data from keys_struct and convert to dict obj
 def getHyperparams(skNum):
-	ksPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
+	ksPath = os.path.join('.', '..', 'out', 'sk', 'log', 'ann', 'keys_struct.txt')
+	fciKS = FCI(True, ksPath)
 	skData = []
 	hparams = {}
 	with open(ksPath, 'r') as ksFile:
 		ksFile.readline()
 		for ksLine in ksFile:
 			lineEles = ksLine.strip().split(',')
-			if lineEles[0] == skNum:
+			if lineEles[fciKS.getIdx('sk_num')] == skNum:
 				skData = lineEles
 				break
 	if (len(skData) >= 15):
-		hparams['start_date'] = skData[5]
-		hparams['end_date'] = skData[6]
-		hparams['call'] = skData[7]
-		hparams['learn_rate'] = skData[8]
-		hparams['plateau'] = skData[9]
-		hparams['spd'] = skData[10]
-		hparams['tvi'] = skData[11]
-		hparams['ms_mask'] = skData[12]
-		hparams['ind_mask'] = skData[13]
-		hparams['nar_mask'] = skData[14]
+		hparams['start_date'] = skData[fciKS.getIdx('start_date')]
+		hparams['end_date'] = skData[fciKS.getIdx('end_date')]
+		hparams['call'] = skData[fciKS.getIdx('call')]
+		hparams['learn_rate'] = skData[fciKS.getIdx('learn_rate')]
+		hparams['plateau'] = skData[fciKS.getIdx('plateau')]
+		hparams['spd'] = skData[fciKS.getIdx('spd')]
+		hparams['tvi'] = skData[fciKS.getIdx('tvi')]
+		hparams['ms_mask'] = skData[fciKS.getIdx('ms_mask')]
+		hparams['ind_mask'] = skData[fciKS.getIdx('ind_mask')]
+		hparams['nar_mask'] = skData[fciKS.getIdx('nar_mask')]
 	return hparams	
 	
 #general funct comparing mask strings
@@ -126,24 +130,27 @@ def isRightClassificationPrediction(smTensor, rightBin):
 		is_right_pred = True
 	return maxIdx, is_right_pred
 
-#converts ByDate line into ML line, alos returns if line matches a NAR mask
+#converts ByDate line into ML line, also returns if line matches a NAR mask
 def normCleanLine(lineEles, tvi, plateau, indMask, narMask):
-	#line index
-	narIdx = len(indMask) + 1
-	tviStartIdx = len(indMask) + 2
+	#create a FCI for ByDate file
+	bdPath = os.path.join('.', '..', '..', 'DB_Intrinio', 'Clean', 'ByDate')
+	fciBD = FCI(False, bdPath)
+	#get index for target var
+	tviStartIdx = fciBD.getIdx('appr_intra1')
 	#check Clean ByDate file for good NAR val
-	narItr = lineEles[narIdx]
+	narItr = lineEles[fciBD.getIdx('nar_mask')]
 	while (len(narItr) < len(narMask)):
 		narItr = narItr + 'x'
 	matches_nar = compareMasks(narMask, narItr)
 	nline = []
-	nline.append(lineEles[0]) 
+	nline.append(lineEles[fciBD.getIdx('ticker')]) 
 	tvActStr = ''
 	if matches_nar:
 		for c in range(len(indMask)):
+			indName = 'ind' + str(c)
 			if indMask[c] == '1':
 				#add feature space var
-				fsVal = (1.0/65535.0) * float(lineEles[c+1])
+				fsVal = (1.0/65535.0) * float(lineEles[fciBD.getIdx(indName)])
 				fsStr = f"{fsVal:.7f}"
 				nline.append(fsStr)
 		#add target var
