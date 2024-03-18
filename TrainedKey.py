@@ -27,6 +27,10 @@ class SingleKey:
 		if (len(skData) >= 15):
 			self.__hyperparams['start_date'] = skData[fciKS.getIdx('start_date')]
 			self.__hyperparams['end_date'] = skData[fciKS.getIdx('end_date')]
+			self.__hyperparams['epochs'] = skData[fciKS.getIdx('epochs')]
+			self.__hyperparams['batch_size'] = skData[fciKS.getIdx('batch_size')]
+			self.__hyperparams['hidden_layer_dims'] = skData[fciKS.getIdx('hidden_layer_dims')]
+			self.__hyperparams['activation_funct'] = skData[fciKS.getIdx('activation_funct')]
 			self.__hyperparams['call'] = skData[fciKS.getIdx('call')]
 			self.__hyperparams['learn_rate'] = skData[fciKS.getIdx('learn_rate')]
 			self.__hyperparams['plateau'] = skData[fciKS.getIdx('plateau')]
@@ -40,9 +44,12 @@ class SingleKey:
 		#load in NN
 		nnPath = os.path.join('..', 'out', 'sk', 'log', 'ann', 'structure', 'struct_'+str(skNum)+'.pt')
 		inputSize = self.__hyperparams['ind_mask'].count('1')
-		hiddenSize = inputSize * 2
+		hiddenSizes = []
+		hlDimsStr = self.__hyperparams['hidden_layer_dims'].split('~')
+		for i in range(len(hlDimsStr)):
+			hiddenSizes.append(int(hlDimsStr[i]))
 		outputSize = 1
-		self.__mynn = StagNN.Regressor1(inputSize, hiddenSize, outputSize)
+		self.__mynn = StagNN.Regressor1(inputSize, hiddenSizes, outputSize)
 		self.__mynn.load_state_dict(torch.load(nnPath))
 
 	#========== GETTERS ==========
@@ -50,6 +57,12 @@ class SingleKey:
 		return self.__hyperparams['start_date']
 	def getEndDate(self):
 		return self.__hyperparams['end_date']
+	def getEpochs(self):
+		return self.__hyperparams['epochs']
+	def getBatchSize(self):
+		return self.__hyperparams['batch_size']
+	def getHiddenLayerDims(self):
+		return self.__hyperparams['hidden_layer_dims']
 	def getCall(self):
 		return self.__hyperparams['call']
 	def getLearnRate(self):
@@ -75,6 +88,12 @@ class SingleKey:
 		self.__hyperparams['end_date'] = date
 	def setCall(self, call):
 		self.__hyperparams['call'] = call
+	def setEpochs(self, epochs):
+		self.__hyperparams['epochs'] = epochs
+	def setBatchSize(self, batchSize):
+		self.__hyperparams['batch_size'] = batchSize
+	def setHiddenLayerDims(self, hlDims):
+		self.__hyperparams['hidden_layer_dims'] = hlDims
 	def setLearnRate(self, lrate):
 		self.__hyperparams['learn_rate'] = lrate
 	def setPlateau(self, plat):
@@ -94,6 +113,7 @@ class SingleKey:
 	#========== PERF METRIC METHODS ==========
 	def singleDatePredictions(self, predDate, spd, print_predictions):
 		#[0] get necessary hyperparams
+		actFunctCode = self.__hyperparams['activation_funct']
 		tvi = int(self.__hyperparams['tvi'])
 		plateau = float(self.__hyperparams['plateau'])
 		msMask = self.__hyperparams['ms_mask']
@@ -146,7 +166,7 @@ class SingleKey:
 					inData = list(map(float, nline[1:-1]))
 					inTensor = torch.tensor([inData])
 					with torch.no_grad():
-						output = self.__mynn(inTensor)
+						output = self.__mynn(inTensor, actFunctCode)
 					outputVal = output.item()
 					#get actual target val from Clean/ByDate
 					tvNorm = 0.5

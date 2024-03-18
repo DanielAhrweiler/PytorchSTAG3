@@ -3,29 +3,47 @@ import torch.nn as nn
 
 #architecture for a regression NN, 1 hidden layer
 class Regressor1(nn.Module):
-	def __init__(self, inputSize, hiddenSize1, outputSize):
+	def __init__(self, inputSize, hiddenSizes, outputSize):
 		super(Regressor1, self).__init__()
-		self.hidden1 = nn.Linear(inputSize, hiddenSize1)
-		self.output = nn.Linear(hiddenSize1, outputSize)
+		self.hidden1 = nn.Linear(inputSize, hiddenSizes[0])
+		self.output = nn.Linear(hiddenSizes[0], outputSize)
 		self.sigmoid = nn.Sigmoid()
+		self.relu = nn.ReLU()
+		self.lrelu = nn.LeakyReLU(0.01)
+		self.tanh = nn.Tanh()
 
-	def forward(self, x):
-		#print(f'BEFORE | HL Weights = {self.hidden1.weight.tolist()}')
-		#print(f'BEFORE | HL Biases = {self.hidden1.bias.tolist()}')
-		#print(f'BEFORE | HL Outputs = {self.hidden1(x)}')
-		hiddenOut1 = self.sigmoid(self.hidden1(x))
-		#print(f'AFTER | HL Weights = {self.hidden1.weight.tolist()}')
-		#print(f'AFTER | HL Biases = {self.hidden1.bias.tolist()}')
+	def forward(self, x, actFunctCode):
+		hiddenOut1 = self.hidden1(x)
+		#print(f'BEFORE AF | HL Weights = {self.hidden1.weight.tolist()}')
+		#print(f'BEFORE AF | HL Biases = {self.hidden1.bias.tolist()}')
+		#print(f'BEFORE AF | HL Outputs = {self.hidden1(x)}')
+		if actFunctCode == 'SIGM':
+			hiddenOut1 = self.sigmoid(hiddenOut1)
+		elif actFunctCode == 'RELU':
+			hiddenOut1 = self.relu(hiddenOut1)
+		elif actFunctCode == 'LRELU':
+			hiddenOut1 = self.lrelu(hiddenOut1)
+		elif actFunctCode == 'TANH':
+			hiddenOut1 = self.tanh(hiddenOut1)
+		else:
+			raise ValueError(f'Invalid activation code [{actFunctCode}]')
+	
+		#print(f'AFTER AF | HL Weights = {self.hidden1.weight.tolist()}')
+		#print(f'AFTER AF | HL Biases = {self.hidden1.bias.tolist()}')
 		output = self.output(hiddenOut1)
 		return output
 
+	def setLeakValue(self, leakVal):
+		self.lrelu = nn.LeakyReLU(leakVal)
+
+
 #architecture for a regression NN, 2 hidden layers
 class Regressor2(nn.Module):
-	def __init__(self, inputSize, hiddenSize1, hiddenSize2, outputSize):
+	def __init__(self, inputSize, hiddenSizes, outputSize):
 		super(Regressor2, self).__init__()
-		self.hidden1 = nn.Linear(inputSize, hiddenSize1)
-		self.hidden2 = nn.Linear(hiddenSize1, hiddenSize2)
-		self.output = nn.Linear(hiddenSize1, outputSize)
+		self.hidden1 = nn.Linear(inputSize, hiddenSizes[0])
+		self.hidden2 = nn.Linear(hiddenSizes[0], hiddenSizes[1])
+		self.output = nn.Linear(hiddenSizes[1], outputSize)#change back to hiddenSizes[0]?? 
 		self.sigmoid = nn.Sigmoid()
 
 	def forward(self, x):
@@ -36,10 +54,10 @@ class Regressor2(nn.Module):
 
 #architecture for a classification NN, 1 hidden layer
 class Classifier1(nn.Module):
-	def __init__(self, inputSize, hiddenSize, outputSize):
+	def __init__(self, inputSize, hiddenSizes, outputSize):
 		super(Classifier1, self).__init__()
-		self.hidden1 = nn.Linear(inputSize, hiddenSize)
-		self.output = nn.Linear(hiddenSize, outputSize)
+		self.hidden1 = nn.Linear(inputSize, hiddenSizes[0])
+		self.output = nn.Linear(hiddenSizes[0], outputSize)
 		self.relu = nn.ReLU()
 		self.softmax = nn.Softmax(dim=1)
 
@@ -50,11 +68,11 @@ class Classifier1(nn.Module):
 
 #architecture for a classification NN, 1 hidden layer
 class Classifier2(nn.Module):
-	def __init__(self, inputSize, hiddenSize1, hiddenSize2, outputSize):
+	def __init__(self, inputSize, hiddenSizes, outputSize):
 		super(Classifier2, self).__init__()
-		self.hidden1 = nn.Linear(inputSize, hiddenSize1)
-		self.hidden2 = nn.Linear(hiddenSize1, hiddenSize2)
-		self.output = nn.Linear(hiddenSize2, outputSize)
+		self.hidden1 = nn.Linear(inputSize, hiddenSizes[0])
+		self.hidden2 = nn.Linear(hiddenSizes[0], hiddenSizes[1])
+		self.output = nn.Linear(hiddenSizes[1], outputSize)
 		self.relu = nn.ReLU()
 		self.softmax = nn.Softmax(dim=1)
 

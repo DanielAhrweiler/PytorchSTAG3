@@ -52,10 +52,12 @@ def checkNansInNN(mynn):
 #define vars for custom db
 startDate = '2018-01-01'
 endDate = '2023-06-01'
+activationFunctCode = 'SIGM'
+lossFunct = 0
 spd = 10
 tvi = 4
 plateau = 15.0
-msMask = 'xxxxxx0x'
+msMask = 'xxxxxxx0'
 indMask = '111111111111111111111111'
 narMask = '1111x'
 dbSizes = [[msMask, indMask, str(tvi), '1']]
@@ -244,13 +246,13 @@ Enter: """
 
 #calc nodes in inputlayer & hiddenlayer
 inputSize = indMask.count('1')
-hiddenSize = inputSize * 2
+regHiddenSizes = [(inputSize * 2)]
+clsHiddenSizes = [55]
 regOutputSize = 1
 clsOutputSize = 3
-hiddenSizes = [55]
 #other hyperparams
 learnRate = 0.007
-numOfEpochs = 10
+numOfEpochs = 7
 trainBatchSize = 64
 validBatchSize = linesPerSection
 regErrLog = []
@@ -267,8 +269,8 @@ for i in range(clsOutputSize-1):
 	clsThresholds.append(tvVals[clsIdx])
 
 #create instance of neural network
-regNN = stag.Regressor1(inputSize, hiddenSize, regOutputSize)
-clsNN = stag.ClassifierX(inputSize, hiddenSizes, clsOutputSize)
+regNN = stag.Regressor1(inputSize, regHiddenSizes, regOutputSize)
+clsNN = stag.ClassifierX(inputSize, clsHiddenSizes, clsOutputSize)
 #au.inDepthDir('mynn', mynn)
 
 #create loss funct and optimizer
@@ -306,7 +308,7 @@ for epoch in range(numOfEpochs):
 		print(f'clsTargetTensor shape : {clsTargetTensor.shape}')
 		print(f'clsTargetTensor has nan : {torch.isnan(clsTargetTensor).any().item()}')
 		for j in range(len(fspaceTensor)):
-			print(f'--> fspaceTensor[{j}] shape : {fspaceTensor[j].shape}')
+			#print(f'--> fspaceTensor[{j}] shape : {fspaceTensor[j].shape}')
 			regTT = regTargetTensor[j]
 			clsTT = clsTargetTensor[j].squeeze().to(torch.long)
 
@@ -335,7 +337,7 @@ for epoch in range(numOfEpochs):
 			#===========================
 
 			#forward pass
-			regOut = regNN(fspaceTensor[j])
+			regOut = regNN(fspaceTensor[j], activationFunctCode)
 			if (torch.isnan(regOut).any().item()):
 				print('!!! regOut has nan values !!!')
 
@@ -560,7 +562,7 @@ for epoch in range(numOfEpochs):
 				clsTT = clsTargetTensor[0].squeeze().to(torch.long)
 				#forward pass
 				with torch.no_grad():
-					regOut = regNN(fspaceTensor[0])
+					regOut = regNN(fspaceTensor[0], activationFunctCode)
 					clsOut = clsNN(fspaceTensor[0])
 					regLoss = regCriterion(regOut, regTargetTensor[0])
 					clsLoss = clsCriterion(clsOut, clsTT)
@@ -611,49 +613,59 @@ if saveStr.lower() == 'y':
 
 	#write data to keys_struct file
 	sline = []
-	sline.append(str(newSK))
-	sline.append('python')
-	sline.append('IT')
-	sline.append('CR')
-	sline.append(dt.today().strftime('%Y-%m-%d'))
-	sline.append(startDate)
-	sline.append(endDate)
-	sline.append('0')
-	sline.append(f"{learnRate:.5f}")
-	sline.append(f"{plateau:.2f}")
-	sline.append(str(spd))
-	sline.append(str(tvi))
-	sline.append(msMask)
-	sline.append(indMask)
-	sline.append(narMask)
-	sline.append(f"{avgValidErr:.11f}")
+	sline.append(str(newSK))							#[0] sk_num
+	sline.append('python')								#[1] language
+	sline.append('IT')									#[2] db_used
+	sline.append(dt.today().strftime('%Y-%m-%d'))		#[3] date_ran
+	sline.append(startDate)								#[4] start_date
+	sline.append(endDate)								#[5] end_date
+	sline.append(str(numOfEpochs))						#[6] epochs
+	sline.append(str(trainBatchSize))					#[7] batch_size
+	hlDims = ""
+	for i in range(len(regHiddenSizes)):
+		hlDims += str(regHiddenSizes[i])
+		if (i != (len(regHiddenSizes)-1)):
+			hlDims += "~"
+	sline.append(hlDims)								#[8] hidden_layer_dims
+	sline.append(activationFunctCode)					#[9] activation_funct
+	sline.append(str(lossFunct))						#[10] loss_funct
+	sline.append('CR')									#[11] output_type
+	sline.append('0')									#[12] call
+	sline.append(f"{learnRate:.5f}")					#[13] learn_rate
+	sline.append(f"{plateau:.2f}")						#[14] plateau
+	sline.append(str(spd))								#[15] spd
+	sline.append(str(tvi))								#[16] tvi
+	sline.append(msMask)								#[17] ms_mask
+	sline.append(indMask)								#[18] ind_mask
+	sline.append(narMask)								#[19] nar_mask
+	sline.append(f"{avgValidErr:.11f}")					#[20] avg_error
 	lline = sline.copy()
 	lline[0] = str(newSK+1)
-	lline[7] = '1'
+	lline[fciKS.getIdx('call')] = '1'
 	ksFile.append(sline)
 	ksFile.append(lline)
 	au.writeToFile(ksPath, ksFile, ',')
 	print('--> ', ksPath, ' WRITTEN')
 	#write data to keys_perf file
 	sline = []
-	sline.append(str(newSK))
-	sline.append('0')
-	sline.append(str(spd))
-	sline.append(str(tvi))
-	sline.append(msMask)
-	sline.append(narMask)
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
-	sline.append('ph')
+	sline.append(str(newSK))			#[0] sk_num
+	sline.append('0')					#[1] call
+	sline.append(str(spd))				#[2] spd
+	sline.append(str(tvi))				#[3] tvi
+	sline.append(msMask)				#[4] ms_mask
+	sline.append(narMask)				#[5] nar_mask
+	sline.append('ph')					#[6] bim
+	sline.append('ph')					#[7] som
+	sline.append('ph')					#[8] bso_train_apapt
+	sline.append('ph')					#[9] bso_valid_apapt
+	sline.append('ph')					#[10] bso_train_posp
+	sline.append('ph')					#[11] bso_valid_posp
+	sline.append('ph')					#[12] plat_train_apapt
+	sline.append('ph')					#[13] plat_valid_apapt
+	sline.append('ph')					#[14] true_train_apapt
+	sline.append('ph')					#[15] true_valid_apapt
+	sline.append('ph')					#[16] true_train_posp
+	sline.append('ph')					#[17] true_valid_posp
 	lline = sline.copy()
 	lline[0] = str(newSK+1)
 	lline[1] = '1'
